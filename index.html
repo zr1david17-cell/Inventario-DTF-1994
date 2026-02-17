@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor DTF Cloud Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #5C7E8F;
+            --secondary: #A2A2A2;
+            --light: #D4DDE2;
+            --white: #FFFFFF;
+            --dark: #2D3748;
+        }
+        * { font-family: 'Poppins', sans-serif; letter-spacing: 0.02em; box-sizing: border-box; }
+        body { background: linear-gradient(135deg, #5C7E8F 0%, #A2A2A2 100%); min-height: 100vh; margin: 0; }
+        .glass { background: rgba(255,255,255,0.97); border-radius: 16px; box-shadow: 0 8px 32px rgba(92,126,143,0.15); border: 1px solid rgba(212,221,226,0.3); }
+        .btn-primary { background: linear-gradient(135deg, #5C7E8F, #A2A2A2); color: white; font-weight: 600; border: none; cursor: pointer; transition: all 0.3s; text-transform: uppercase; letter-spacing: 0.05em; }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(92,126,143,0.4); }
+        .btn-green { background: #10b981; color: white; font-weight: 600; border: none; cursor: pointer; transition: all 0.3s; }
+        .btn-blue { background: #3b82f6; color: white; font-weight: 600; border: none; cursor: pointer; transition: all 0.3s; }
+        .btn-red { background: #ef4444; color: white; font-weight: 600; border: none; cursor: pointer; transition: all 0.3s; }
+        .btn-orange { background: #f97316; color: white; font-weight: 600; border: none; cursor: pointer; transition: all 0.3s; }
+        .btn-purple { background: #9333ea; color: white; font-weight: 600; border: none; cursor: pointer; transition: all 0.3s; }
+        .btn-gray { background: #6b7280; color: white; font-weight: 600; border: none; cursor: pointer; transition: all 0.3s; }
+        input, textarea, select { border: 2px solid #D4DDE2; padding: 10px 14px; border-radius: 8px; font-family: 'Poppins', sans-serif; transition: border-color 0.3s; outline: none; }
+        input:focus, textarea:focus { border-color: #5C7E8F; }
+        .tab-active { background: linear-gradient(135deg, #5C7E8F, #A2A2A2); color: white; }
+        .tab-inactive { background: #f3f4f6; color: #374151; }
+        .modal-overlay { position: fixed; inset: 0; background: rgba(92,126,143,0.95); display: flex; align-items: center; justify-content: center; z-index: 9999; cursor: pointer; }
+        .modal-img { max-width: 90vw; max-height: 90vh; border-radius: 12px; object-fit: contain; }
+        .img-thumb { width: 80px; height: 80px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 2px solid #D4DDE2; transition: transform 0.2s; }
+        .img-thumb:hover { transform: scale(1.1); border-color: #5C7E8F; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .slide-in { animation: slideIn 0.3s ease-out; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #D4DDE2; border-top-color: #5C7E8F; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-overlay { position: fixed; inset: 0; background: rgba(92,126,143,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9998; gap: 16px; }
+        .loading-text { color: white; font-size: 1.1rem; font-weight: 600; }
+        ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #f1f1f1; } ::-webkit-scrollbar-thumb { background: #5C7E8F; border-radius: 3px; }
+    </style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+import { getFirestore, collection, doc, setDoc, getDoc, deleteDoc, onSnapshot, query } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+// Storage no requerido - imágenes en Firestore base64
+
+// ── FIREBASE CONFIG ──────────────────────────────────────────────
+const app = initializeApp({
+    apiKey: "AIzaSyD8Zl-pSyzjqFMHj7YwGMm9FG1RGcXNYh4",
+    authDomain: "gestor-dtf-d9beb.firebaseapp.com",
+    projectId: "gestor-dtf-d9beb",
+    storageBucket: "gestor-dtf-d9beb.firebasestorage.app",
+    messagingSenderId: "2726810320",
+    appId: "1:2726810320:web:d4e0930e98642cd5bc44d5"
+});
+const auth = getAuth(app);
+const db = getFirestore(app);
+// Storage no requerido
+
+// ── STATE ────────────────────────────────────────────────────────
+let currentUser = null;
+let designs = [];
+let unsubscribe = null;
+let activeTab = 'pedido';
+let searchTerm = '';
+let orderResults = null;
+let imageModal = null;
+let isProcessing = false;
+let isLoading = true;
+let loadingMessage = 'Conectando con Firebase...';
+let authError = '';
+
+// ── FIREBASE HELPERS ─────────────────────────────────────────────
+async function saveDesignCloud(design) {
+    try {
+        const ref = doc(db, 'users', currentUser.uid, 'designs', design.code);
+        await setDoc(ref, design, { merge: true });
+        return true;
+    } catch (e) {
+        console.error(e);
+        if (e.code === 'permission-denied') {
+            alert('⚠️ Permisos de Firestore. Activa las reglas en modo de prueba en Firebase Console.');
+        }
+        return false;
+    }
+}
+
+async function deleteDesignCloud(code) {
+    try {
+        await deleteDoc(doc(db, 'users', currentUser.uid, 'designs', code));
+        return true;
+    } catch (e) { console.error(e); return false; }
+}
+
+async function uploadImageCloud(file, code) {
+    try {
+        const compressed = await compressImageTo1MB(file);
+        const sizeKB = Math.round((compressed.length * 3/4) / 1024);
+        console.log(`Imagen ${code}: ${sizeKB}KB`);
+        return { success: true, url: compressed };
+    } catch (e) {
+        console.error(e);
+        alert('❌ Error procesando imagen');
+        return { success: false };
+    }
+}
+
+function compressImageTo1MB(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const tryCompress = (maxSize, quality) => {
+                    const canvas = document.createElement('canvas');
+                    let w = img.width, h = img.height;
+                    if (w > maxSize || h > maxSize) {
+                        if (w > h) { h = Math.round((h/w)*maxSize); w = maxSize; }
+                        else { w = Math.round((w/h)*maxSize); h = maxSize; }
+                    }
+                    canvas.width = w; canvas.height = h;
+                    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                    const result = canvas.toDataURL('image/jpeg', quality);
+                    // Check size in bytes (base64 * 3/4)
+                    const bytes = (result.length * 3) / 4;
+                    return { result, bytes };
+                };
+
+                // Try progressively until under 1MB (1,000,000 bytes)
+                const attempts = [
+                    { maxSize: 800, quality: 0.8 },
+                    { maxSize: 700, quality: 0.7 },
+                    { maxSize: 600, quality: 0.6 },
+                    { maxSize: 500, quality: 0.5 },
+                    { maxSize: 400, quality: 0.4 },
+                    { maxSize: 300, quality: 0.3 },
+                ];
+
+                for (const attempt of attempts) {
+                    const { result, bytes } = tryCompress(attempt.maxSize, attempt.quality);
+                    if (bytes < 900000) { // Under 900KB to be safe
+                        resolve(result);
+                        return;
+                    }
+                }
+
+                // Last resort - smallest possible
+                const { result } = tryCompress(200, 0.2);
+                resolve(result);
+            };
+            img.onerror = reject;
+            img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+function setupListener(uid) {
+    if (unsubscribe) unsubscribe();
+
+    const timeout = setTimeout(() => {
+        if (isLoading) {
+            isLoading = false;
+            authError = '⏱️ La conexión tardó demasiado. Verifica tu internet e intenta recargar la página.';
+            render();
+        }
+    }, 15000);
+
+    const q = query(collection(db, 'users', uid, 'designs'));
+    unsubscribe = onSnapshot(q, (snap) => {
+        clearTimeout(timeout);
+        designs = snap.docs.map(d => d.data());
+        isLoading = false;
+        render();
+    }, (err) => {
+        clearTimeout(timeout);
+        console.error(err);
+        isLoading = false;
+        if (err.code === 'permission-denied') {
+            authError = '🔒 Sin permisos. Ve a Firebase → Firestore → Reglas y activa modo de prueba.';
+        } else if (err.code === 'unavailable') {
+            authError = '📡 Sin conexión a internet. Verifica tu red e intenta de nuevo.';
+        } else {
+            authError = `❌ Error: ${err.message}. Recarga la página.`;
+        }
+        render();
+    });
+}
+
+function showError(msg) {
+    isLoading = false;
+    authError = msg;
+    render();
+}
+
+// ── EXPORT / IMPORT ──────────────────────────────────────────────
+function exportData() {
+    const data = { designs, exportDate: new Date().toISOString(), version: '3.0' };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gestor-dtf-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    alert('✅ Datos exportados correctamente.');
+}
+
+async function importData() {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.json';
+    input.onchange = async (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+            try {
+                const data = JSON.parse(ev.target.result);
+                if (!data.designs || !Array.isArray(data.designs)) { alert('❌ Archivo inválido'); return; }
+                if (!confirm(`¿Importar ${data.designs.length} diseños a la nube?`)) return;
+                setLoading(true, `Importando ${data.designs.length} diseños a Firebase...`);
+                for (const d of data.designs) { await saveDesignCloud(d); }
+                setLoading(false);
+                alert(`✅ ${data.designs.length} diseños importados a la nube!`);
+            } catch (e) { setLoading(false); alert('❌ Error al importar'); }
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+}
+
+function setLoading(val, msg = '') {
+    isLoading = val;
+    loadingMessage = msg;
+    render();
+}
+
+// ── OCR ──────────────────────────────────────────────────────────
+async function handleOCR() {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*';
+    input.onchange = async (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        setLoading(true, 'Procesando imagen con OCR...');
+        try {
+            const result = await Tesseract.recognize(file, 'eng');
+            document.getElementById('orderCodes').value = result.data.text;
+            setLoading(false);
+            alert('✅ Texto extraído. Revisa y procesa el pedido.');
+        } catch { setLoading(false); alert('❌ Error procesando imagen'); }
+    };
+    input.click();
+}
+
+// ── ORDER PROCESSING ─────────────────────────────────────────────
+function processOrder() {
+    const codesText = document.getElementById('orderCodes')?.value || '';
+    if (!codesText.trim()) { alert('Ingresa los códigos del pedido'); return; }
+    const lines = codesText.trim().split('\n').filter(l => l.trim());
+    const codeCounts = {};
+    lines.forEach(line => {
+        line.trim().split(/[\s,;]+/).forEach(part => {
+            const c = part.trim().toUpperCase();
+            if (c) codeCounts[c] = (codeCounts[c] || 0) + 1;
+        });
+    });
+    const available = [], outOfStock = [], notFound = [];
+    Object.entries(codeCounts).forEach(([code, qty]) => {
+        const d = designs.find(x => x.code === code);
+        if (!d) notFound.push({ code, qty });
+        else if ((d.stock || 0) >= qty) available.push({ design: d, qty });
+        else outOfStock.push({ design: d, qty, have: d.stock || 0 });
+    });
+    orderResults = { available, outOfStock, notFound };
+    render();
+}
+
+async function deliverOrder(code, qty) {
+    const d = designs.find(x => x.code === code);
+    if (!d) return;
+    d.stock = Math.max(0, (d.stock || 0) - qty);
+    await saveDesignCloud(d);
+    processOrder();
+}
+
+async function markPrinted(code) {
+    const d = designs.find(x => x.code === code);
+    if (!d) return;
+    const qty = prompt(`¿Cuántas unidades imprimir de ${code}?`, '10');
+    if (!qty) return;
+    d.stock = (d.stock || 0) + parseInt(qty);
+    d.isPrinted = true;
+    d.lastPrinted = new Date().toISOString();
+    await saveDesignCloud(d);
+    processOrder();
+}
+
+// ── BULK IMPORT ──────────────────────────────────────────────────
+async function bulkImport() {
+    const textarea = document.getElementById('bulkImportCodes');
+    const text = textarea?.value?.trim();
+    if (!text) { alert('Pega los códigos primero'); return; }
+    const codes = text.split(/[\n,;]+/).map(c => c.trim().toUpperCase()).filter(c => c);
+    if (!confirm(`¿Importar ${codes.length} diseños?`)) return;
+    setLoading(true, `Guardando ${codes.length} diseños en la nube...`);
+    let imported = 0, skipped = 0;
+    for (const code of codes) {
+        if (designs.find(d => d.code === code)) { skipped++; continue; }
+        await saveDesignCloud({ code, client: '', description: '', notes: '', isPrinted: false, stock: 0, imageUrl: null, createdAt: new Date().toISOString() });
+        imported++;
+    }
+    setLoading(false);
+    alert(`✅ Importados: ${imported}\n⊘ Ya existían: ${skipped}`);
+    activeTab = 'inventario';
+    render();
+}
+
+// ── RENDER ───────────────────────────────────────────────────────
+function render() {
+    const root = document.getElementById('app');
+    if (!root) return;
+
+    if (isLoading) {
+        root.innerHTML = `
+        <div class="loading-overlay">
+            <div class="spinner"></div>
+            <div class="loading-text">${loadingMessage}</div>
+        </div>`;
+        return;
+    }
+
+    if (!currentUser) { root.innerHTML = renderLogin(); bindLoginEvents(); return; }
+    root.innerHTML = renderMain();
+    bindMainEvents();
+}
+
+function renderLogin() {
+    return `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px">
+        <div class="glass" style="padding:40px;max-width:440px;width:100%">
+            <h1 style="font-size:2rem;font-weight:900;color:#5C7E8F;text-align:center;margin-bottom:8px;letter-spacing:0.05em">GESTOR DTF CLOUD</h1>
+            <p style="color:#A2A2A2;text-align:center;margin-bottom:32px;font-weight:500">Inventario sincronizado en la nube ☁️</p>
+            ${authError ? `<div style="background:#fee2e2;border:1px solid #ef4444;padding:12px;border-radius:8px;margin-bottom:16px;color:#991b1b;font-size:0.85rem">${authError}</div>` : ''}
+            <div style="margin-bottom:16px">
+                <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:6px;color:#2D3748">Email</label>
+                <input type="email" id="loginEmail" placeholder="tu@email.com" style="width:100%">
+            </div>
+            <div style="margin-bottom:24px">
+                <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:6px;color:#2D3748">Contraseña</label>
+                <input type="password" id="loginPassword" placeholder="••••••••" style="width:100%">
+            </div>
+            <button id="btnLogin" class="btn-primary" style="width:100%;padding:14px;border-radius:10px;font-size:1rem;margin-bottom:10px">🔐 Iniciar Sesión</button>
+            <button id="btnRegister" style="width:100%;padding:14px;border-radius:10px;font-size:0.9rem;background:#f3f4f6;color:#374151;border:none;cursor:pointer;font-weight:600;font-family:Poppins,sans-serif">✨ Crear Cuenta Nueva</button>
+            <div id="authMsg" style="margin-top:12px;text-align:center;font-size:0.85rem"></div>
+        </div>
+    </div>`;
+}
+
+function bindLoginEvents() {
+    document.getElementById('btnLogin')?.addEventListener('click', async () => {
+        const email = document.getElementById('loginEmail').value;
+        const pass = document.getElementById('loginPassword').value;
+        const msg = document.getElementById('authMsg');
+        if (!email || !pass) { msg.innerHTML = '<span style="color:#ef4444">Completa todos los campos</span>'; return; }
+        msg.innerHTML = '<span style="color:#5C7E8F">Iniciando sesión...</span>';
+        try {
+            await signInWithEmailAndPassword(auth, email, pass);
+        } catch (e) {
+            const errors = { 'auth/user-not-found': 'Usuario no encontrado', 'auth/wrong-password': 'Contraseña incorrecta', 'auth/invalid-email': 'Email inválido', 'auth/invalid-credential': 'Credenciales incorrectas' };
+            msg.innerHTML = `<span style="color:#ef4444">❌ ${errors[e.code] || e.message}</span>`;
+        }
+    });
+    document.getElementById('btnRegister')?.addEventListener('click', async () => {
+        const email = document.getElementById('loginEmail').value;
+        const pass = document.getElementById('loginPassword').value;
+        const msg = document.getElementById('authMsg');
+        if (!email || !pass) { msg.innerHTML = '<span style="color:#ef4444">Completa todos los campos</span>'; return; }
+        if (pass.length < 6) { msg.innerHTML = '<span style="color:#ef4444">Mínimo 6 caracteres</span>'; return; }
+        msg.innerHTML = '<span style="color:#5C7E8F">Creando cuenta...</span>';
+        try {
+            await createUserWithEmailAndPassword(auth, email, pass);
+        } catch (e) {
+            const errors = { 'auth/email-already-in-use': 'Email ya registrado', 'auth/invalid-email': 'Email inválido', 'auth/weak-password': 'Contraseña muy débil' };
+            msg.innerHTML = `<span style="color:#ef4444">❌ ${errors[e.code] || e.message}</span>`;
+        }
+    });
+}
+
+function renderMain() {
+    const stats = {
+        total: designs.length,
+        printed: designs.filter(d => d.isPrinted).length,
+        notPrinted: designs.filter(d => !d.isPrinted).length,
+        totalStock: designs.reduce((s, d) => s + (d.stock || 0), 0),
+        lowStock: designs.filter(d => (d.stock || 0) > 0 && (d.stock || 0) <= 3).length,
+        outOfStock: designs.filter(d => d.isPrinted && (d.stock || 0) === 0).length
+    };
+
+    const filtered = designs.filter(d =>
+        d.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (d.client && d.client.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (d.description && d.description.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+
+    return `
+    ${imageModal ? `<div class="modal-overlay" id="imgModal"><img src="${imageModal}" class="modal-img"></div>` : ''}
+    <div style="min-height:100vh;padding:16px">
+    <div style="max-width:1200px;margin:0 auto">
+
+        <!-- HEADER -->
+        <div class="glass" style="padding:24px;margin-bottom:24px">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+                <div>
+                    <h1 style="font-size:2.2rem;font-weight:900;color:#5C7E8F;margin:0;letter-spacing:0.05em">GESTOR DTF PRO</h1>
+                    <p style="color:#A2A2A2;margin:4px 0 0;font-weight:500;font-size:0.9rem">☁️ Sincronizado • ${currentUser.email}</p>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button id="btnExport" class="btn-green" style="padding:8px 16px;border-radius:8px;font-size:0.85rem">💾 Exportar</button>
+                    <button id="btnImport" class="btn-blue" style="padding:8px 16px;border-radius:8px;font-size:0.85rem">📂 Importar</button>
+                    <button id="btnLogout" class="btn-red" style="padding:8px 16px;border-radius:8px;font-size:0.85rem">🚪 Salir</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- STATS -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;margin-bottom:24px">
+            <div class="glass" style="padding:20px;background:#5C7E8F;color:white;border-radius:16px">
+                <div style="font-size:2rem;font-weight:800">${stats.total}</div>
+                <div style="font-size:0.8rem;opacity:0.9;font-weight:500">Total Diseños</div>
+            </div>
+            <div class="glass" style="padding:20px;background:#10b981;color:white;border-radius:16px">
+                <div style="font-size:2rem;font-weight:800">${stats.printed}</div>
+                <div style="font-size:0.8rem;opacity:0.9;font-weight:500">Ya Impresos</div>
+            </div>
+            <div class="glass" style="padding:20px;background:#ef4444;color:white;border-radius:16px">
+                <div style="font-size:2rem;font-weight:800">${stats.notPrinted}</div>
+                <div style="font-size:0.8rem;opacity:0.9;font-weight:500">Sin Imprimir</div>
+            </div>
+            <div class="glass" style="padding:20px;background:#3b82f6;color:white;border-radius:16px">
+                <div style="font-size:2rem;font-weight:800">${stats.totalStock}</div>
+                <div style="font-size:0.8rem;opacity:0.9;font-weight:500">Stock Total</div>
+            </div>
+            <div class="glass" style="padding:20px;background:#f97316;color:white;border-radius:16px">
+                <div style="font-size:2rem;font-weight:800">${stats.lowStock}</div>
+                <div style="font-size:0.8rem;opacity:0.9;font-weight:500">Stock Bajo (≤3)</div>
+            </div>
+            <div class="glass" style="padding:20px;background:#dc2626;color:white;border-radius:16px">
+                <div style="font-size:2rem;font-weight:800">${stats.outOfStock}</div>
+                <div style="font-size:0.8rem;opacity:0.9;font-weight:500">Agotados</div>
+            </div>
+        </div>
+
+        <!-- TABS -->
+        <div class="glass" style="padding:8px;margin-bottom:24px;display:flex;gap:8px;flex-wrap:wrap">
+            <button data-tab="pedido" class="tab-btn ${activeTab==='pedido'?'tab-active':'tab-inactive'}" style="flex:1;padding:12px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;font-family:Poppins,sans-serif">📦 Procesar Pedido</button>
+            <button data-tab="inventario" class="tab-btn ${activeTab==='inventario'?'tab-active':'tab-inactive'}" style="flex:1;padding:12px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;font-family:Poppins,sans-serif">📚 Inventario</button>
+            <button data-tab="importar" class="tab-btn ${activeTab==='importar'?'tab-active':'tab-inactive'}" style="flex:1;padding:12px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;font-family:Poppins,sans-serif">📥 Importar Masivo</button>
+            <button data-tab="nuevo" class="tab-btn ${activeTab==='nuevo'?'tab-active':'tab-inactive'}" style="flex:1;padding:12px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;font-family:Poppins,sans-serif">➕ Nuevo Diseño</button>
+        </div>
+
+        <!-- TAB CONTENT -->
+        <div class="glass slide-in" style="padding:24px">
+            ${activeTab === 'pedido' ? renderOrderTab() : ''}
+            ${activeTab === 'inventario' ? renderInventoryTab(filtered) : ''}
+            ${activeTab === 'importar' ? renderBulkImportTab() : ''}
+            ${activeTab === 'nuevo' ? renderNewDesignTab() : ''}
+        </div>
+
+    </div></div>`;
+}
+
+function renderOrderTab() {
+    return `
+    <h2 style="font-size:1.5rem;font-weight:700;color:#2D3748;margin-bottom:20px">📦 Procesar Pedido</h2>
+    <div style="background:#D4DDE2;padding:16px;border-radius:12px;margin-bottom:16px">
+        <h3 style="color:#5C7E8F;font-weight:700;margin-bottom:8px">📸 Opción 1: Escanear Imagen (OCR)</h3>
+        <p style="font-size:0.85rem;color:#2D3748;margin-bottom:12px">Sube una foto del pedido y extraemos los códigos automáticamente.</p>
+        <button id="btnOCR" class="btn-primary" style="padding:10px 20px;border-radius:8px">📷 Subir Foto del Pedido</button>
+    </div>
+    <div style="background:#fef3c7;padding:16px;border-radius:12px;margin-bottom:16px">
+        <h3 style="color:#92400e;font-weight:700;margin-bottom:8px">✍️ Opción 2: Copiar y Pegar</h3>
+        <p style="font-size:0.85rem;color:#92400e;margin-bottom:12px">Pega los códigos del pedido, uno por línea.</p>
+        <textarea id="orderCodes" placeholder="RT01&#10;DM06&#10;PT02&#10;..." style="width:100%;height:180px;font-family:monospace;font-size:0.9rem;border-color:#f59e0b"></textarea>
+    </div>
+    <button id="btnProcess" class="btn-primary" style="width:100%;padding:16px;border-radius:10px;font-size:1rem;margin-bottom:20px">⚡ Procesar Pedido</button>
+    ${orderResults ? renderOrderResults() : ''}`;
+}
+
+function renderOrderResults() {
+    const { available, outOfStock, notFound } = orderResults;
+    let html = '';
+    if (available.length > 0) {
+        html += `<div style="background:#d1fae5;border:2px solid #10b981;padding:16px;border-radius:12px;margin-bottom:12px">
+            <h3 style="color:#065f46;font-weight:700;margin-bottom:12px">✅ DISPONIBLES EN STOCK (${available.length})</h3>
+            ${available.map(({design, qty}) => `
+            <div style="background:white;padding:12px;border-radius:8px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                ${design.imageUrl ? `<img src="${design.imageUrl}" style="width:50px;height:50px;object-fit:cover;border-radius:6px">` : ''}
+                <div style="flex:1"><span style="font-weight:700;font-size:1.1rem">${design.code}</span><span style="font-size:0.85rem;color:#666;margin-left:12px">Stock: ${design.stock} | Necesitas: ${qty}</span></div>
+                <button class="btn-green deliver-btn" data-code="${design.code}" data-qty="${qty}" style="padding:8px 16px;border-radius:8px;font-size:0.85rem">✓ Entregar (${qty})</button>
+            </div>`).join('')}
+        </div>`;
+    }
+    if (outOfStock.length > 0) {
+        html += `<div style="background:#fee2e2;border:2px solid #ef4444;padding:16px;border-radius:12px;margin-bottom:12px">
+            <h3 style="color:#991b1b;font-weight:700;margin-bottom:12px">🚨 SIN STOCK (${outOfStock.length})</h3>
+            ${outOfStock.map(({design, qty, have}) => `
+            <div style="background:white;padding:12px;border-radius:8px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                ${design.imageUrl ? `<img src="${design.imageUrl}" style="width:50px;height:50px;object-fit:cover;border-radius:6px">` : ''}
+                <div style="flex:1"><span style="font-weight:700;font-size:1.1rem">${design.code}</span><span style="font-size:0.85rem;color:#666;margin-left:12px">Tienes: ${have} | Necesitas: ${qty}</span></div>
+                <button class="btn-red print-btn" data-code="${design.code}" style="padding:8px 16px;border-radius:8px;font-size:0.85rem">🖨️ Ya Imprimí</button>
+            </div>`).join('')}
+        </div>`;
+    }
+    if (notFound.length > 0) {
+        html += `<div style="background:#fef3c7;border:2px solid #f59e0b;padding:16px;border-radius:12px">
+            <h3 style="color:#92400e;font-weight:700;margin-bottom:12px">⚠️ NO ENCONTRADOS (${notFound.length})</h3>
+            ${notFound.map(({code, qty}) => `
+            <div style="background:white;padding:12px;border-radius:8px;margin-bottom:8px">
+                <span style="font-weight:700;font-size:1.1rem">${code}</span><span style="font-size:0.85rem;color:#666;margin-left:12px">Cantidad: ${qty}</span>
+            </div>`).join('')}
+        </div>`;
+    }
+    return html;
+}
+
+function renderInventoryTab(filtered) {
+    return `
+    <h2 style="font-size:1.5rem;font-weight:700;color:#2D3748;margin-bottom:20px">📚 Inventario Completo</h2>
+    <input type="text" id="searchInput" placeholder="🔍 Buscar por código, cliente o descripción..." value="${searchTerm}" style="width:100%;margin-bottom:20px;font-size:1rem">
+    <div style="max-height:600px;overflow-y:auto;display:flex;flex-direction:column;gap:12px">
+        ${filtered.length === 0 ? `<div style="text-align:center;padding:48px;color:#A2A2A2">¡Aún no tienes diseños! Usa "Importar Masivo" o "Nuevo Diseño".</div>` : 
+        filtered.map(d => `
+        <div style="border:2px solid ${(d.stock||0)===0&&d.isPrinted?'#fca5a5':(d.stock||0)<=3&&(d.stock||0)>0?'#fcd34d':'#e5e7eb'};border-radius:12px;padding:16px;background:${(d.stock||0)===0&&d.isPrinted?'#fef2f2':(d.stock||0)<=3&&(d.stock||0)>0?'#fffbeb':'white'}">
+            <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+                ${d.imageUrl ? `<img src="${d.imageUrl}" class="img-thumb view-img" data-url="${d.imageUrl}">` : ''}
+                <div style="flex:1">
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+                        <span style="font-size:1.2rem;font-weight:800;color:#5C7E8F">${d.code}</span>
+                        <span style="padding:3px 10px;border-radius:20px;font-size:0.75rem;font-weight:700;color:white;background:${d.isPrinted?'#10b981':'#ef4444'}">${d.isPrinted?'✓ IMPRESO':'⏳ PENDIENTE'}</span>
+                        <span style="padding:3px 10px;border-radius:20px;font-size:0.75rem;font-weight:700;color:white;background:${(d.stock||0)===0?'#ef4444':(d.stock||0)<=3?'#f97316':'#3b82f6'}">📦 Stock: ${d.stock||0}</span>
+                    </div>
+                    ${d.client ? `<div style="font-size:0.85rem;color:#374151;margin-bottom:4px"><strong>Cliente:</strong> ${d.client}</div>` : ''}
+                    ${d.description ? `<div style="font-size:0.85rem;color:#374151;margin-bottom:4px"><strong>Desc:</strong> ${d.description}</div>` : ''}
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+                        <button class="btn-purple add-img-btn" data-code="${d.code}" style="padding:6px 12px;border-radius:6px;font-size:0.78rem">${d.imageUrl?'🖼️ Cambiar Imagen':'📷 Agregar Imagen'}</button>
+                        <button class="btn-blue add-stock-btn" data-code="${d.code}" style="padding:6px 12px;border-radius:6px;font-size:0.78rem">➕ Agregar Stock</button>
+                        <button class="btn-gray adj-stock-btn" data-code="${d.code}" data-stock="${d.stock||0}" style="padding:6px 12px;border-radius:6px;font-size:0.78rem">✏️ Ajustar</button>
+                        <button class="btn-red del-btn" data-code="${d.code}" style="padding:6px 12px;border-radius:6px;font-size:0.78rem">🗑️ Eliminar</button>
+                    </div>
+                </div>
+            </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function renderBulkImportTab() {
+    return `
+    <h2 style="font-size:1.5rem;font-weight:700;color:#2D3748;margin-bottom:20px">📥 Importación Masiva de Diseños</h2>
+    <div style="background:#D4DDE2;padding:16px;border-radius:12px;margin-bottom:16px">
+        <h3 style="color:#5C7E8F;font-weight:700;margin-bottom:8px">¿Cómo funciona?</h3>
+        <p style="font-size:0.85rem;color:#2D3748;margin-bottom:4px">Pega una lista de códigos (uno por línea) y se guardarán automáticamente en la nube.</p>
+        <p style="font-size:0.8rem;color:#A2A2A2">Todos quedarán como "Por imprimir" con stock 0.</p>
+    </div>
+    <textarea id="bulkImportCodes" placeholder="RT01&#10;RT02&#10;DM06&#10;TYT01&#10;PT01&#10;..." style="width:100%;height:280px;font-family:monospace;font-size:0.9rem;margin-bottom:16px"></textarea>
+    <button id="btnBulkImport" class="btn-primary" style="width:100%;padding:16px;border-radius:10px;font-size:1rem">⚡ Importar Todos a la Nube</button>`;
+}
+
+function renderNewDesignTab() {
+    return `
+    <h2 style="font-size:1.5rem;font-weight:700;color:#2D3748;margin-bottom:20px">➕ Agregar Nuevo Diseño</h2>
+    <div style="display:flex;flex-direction:column;gap:16px">
+        <div>
+            <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:6px;color:#2D3748">Código *</label>
+            <input type="text" id="newCode" placeholder="Ej: RT01" style="width:100%">
+        </div>
+        <div>
+            <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:6px;color:#2D3748">Cliente</label>
+            <input type="text" id="newClient" placeholder="Nombre del cliente" style="width:100%">
+        </div>
+        <div>
+            <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:6px;color:#2D3748">Descripción</label>
+            <input type="text" id="newDesc" placeholder="Descripción del diseño" style="width:100%">
+        </div>
+        <div>
+            <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:6px;color:#2D3748">Notas</label>
+            <textarea id="newNotes" placeholder="Notas adicionales" style="width:100%;height:80px"></textarea>
+        </div>
+        <div>
+            <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:6px;color:#2D3748">Stock Inicial</label>
+            <input type="number" id="newStock" value="0" min="0" style="width:100%">
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+            <input type="checkbox" id="newPrinted" style="width:18px;height:18px">
+            <label for="newPrinted" style="font-size:0.9rem;font-weight:600;color:#2D3748">¿Ya está impreso?</label>
+        </div>
+        <button id="btnSaveNew" class="btn-primary" style="padding:16px;border-radius:10px;font-size:1rem">✓ Agregar Diseño a la Nube</button>
+    </div>`;
+}
+
+function bindMainEvents() {
+    // Tabs
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => { activeTab = btn.dataset.tab; orderResults = null; render(); });
+    });
+
+    // Header buttons
+    document.getElementById('btnExport')?.addEventListener('click', exportData);
+    document.getElementById('btnImport')?.addEventListener('click', importData);
+    document.getElementById('btnLogout')?.addEventListener('click', async () => {
+        if (confirm('¿Cerrar sesión?')) { if (unsubscribe) unsubscribe(); await signOut(auth); }
+    });
+
+    // Image modal
+    document.getElementById('imgModal')?.addEventListener('click', () => { imageModal = null; render(); });
+    document.querySelectorAll('.view-img').forEach(img => {
+        img.addEventListener('click', () => { imageModal = img.dataset.url; render(); });
+    });
+
+    // Order tab
+    document.getElementById('btnOCR')?.addEventListener('click', handleOCR);
+    document.getElementById('btnProcess')?.addEventListener('click', processOrder);
+    document.querySelectorAll('.deliver-btn').forEach(btn => {
+        btn.addEventListener('click', () => deliverOrder(btn.dataset.code, parseInt(btn.dataset.qty)));
+    });
+    document.querySelectorAll('.print-btn').forEach(btn => {
+        btn.addEventListener('click', () => markPrinted(btn.dataset.code));
+    });
+
+    // Inventory tab
+    document.getElementById('searchInput')?.addEventListener('input', (e) => { searchTerm = e.target.value; render(); });
+    document.querySelectorAll('.add-img-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const code = btn.dataset.code;
+            const input = document.createElement('input');
+            input.type = 'file'; input.accept = 'image/*';
+            input.onchange = async (e) => {
+                const file = e.target.files[0]; if (!file) return;
+                setLoading(true, `Comprimiendo y guardando imagen de ${code}...`);
+                const result = await uploadImageCloud(file, code);
+                if (result.success) {
+                    const d = designs.find(x => x.code === code);
+                    if (d) { 
+                        d.imageUrl = result.url; 
+                        await saveDesignCloud(d);
+                        alert(`✅ Imagen de ${code} guardada!`);
+                    }
+                }
+                setLoading(false);
+            };
+            input.click();
+        });
+    });
+    document.querySelectorAll('.add-stock-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const code = btn.dataset.code;
+            const qty = prompt(`Agregar stock a ${code}:`, '10');
+            if (!qty) return;
+            const d = designs.find(x => x.code === code);
+            if (d) { d.stock = (d.stock||0) + parseInt(qty); d.isPrinted = true; d.lastPrinted = new Date().toISOString(); await saveDesignCloud(d); }
+        });
+    });
+    document.querySelectorAll('.adj-stock-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const code = btn.dataset.code;
+            const qty = prompt(`Stock actual: ${btn.dataset.stock}. Nuevo stock:`, btn.dataset.stock);
+            if (qty === null) return;
+            const d = designs.find(x => x.code === code);
+            if (d) { d.stock = Math.max(0, parseInt(qty)||0); await saveDesignCloud(d); }
+        });
+    });
+    document.querySelectorAll('.del-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (confirm(`¿Eliminar ${btn.dataset.code}?`)) await deleteDesignCloud(btn.dataset.code);
+        });
+    });
+
+    // Bulk import
+    document.getElementById('btnBulkImport')?.addEventListener('click', bulkImport);
+
+    // New design
+    document.getElementById('btnSaveNew')?.addEventListener('click', async () => {
+        const code = document.getElementById('newCode')?.value?.trim().toUpperCase();
+        if (!code) { alert('El código es obligatorio'); return; }
+        setLoading(true, 'Guardando diseño en la nube...');
+        await saveDesignCloud({
+            code,
+            client: document.getElementById('newClient')?.value || '',
+            description: document.getElementById('newDesc')?.value || '',
+            notes: document.getElementById('newNotes')?.value || '',
+            stock: parseInt(document.getElementById('newStock')?.value) || 0,
+            isPrinted: document.getElementById('newPrinted')?.checked || false,
+            imageUrl: null,
+            createdAt: new Date().toISOString()
+        });
+        setLoading(false);
+        alert(`✅ Diseño ${code} guardado en la nube!`);
+        activeTab = 'inventario';
+        render();
+    });
+}
+
+// ── AUTH LISTENER ────────────────────────────────────────────────
+onAuthStateChanged(auth, (user) => {
+    currentUser = user;
+    if (user) {
+        loadingMessage = 'Cargando inventario desde la nube...';
+        isLoading = true;
+        render();
+        setupListener(user.uid);
+    } else {
+        isLoading = false;
+        designs = [];
+        render();
+    }
+});
+
+render();
+</script>
+</body>
+</html>
